@@ -1,7 +1,9 @@
 import 'dart:convert';
 
+import 'package:fin_goals/TransactionView.dart';
 import 'package:flutter/material.dart';
 import 'account.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(MyApp());
 
@@ -9,13 +11,15 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'My App',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
-      home: MyHomePage(title: 'Goals'),
-    );
+        debugShowCheckedModeBanner: false,
+        title: 'My App',
+        theme: ThemeData(
+          primarySwatch: Colors.blue,
+        ),
+        home: MyHomePage(title: 'Goals'),
+        routes: {
+          TransactionView.routeName: (context) => TransactionView(),
+        });
   }
 }
 
@@ -38,20 +42,39 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State {
-
   List<Account> accounts;
+  SharedPreferences sharedPreferences;
 
   final formKey = new GlobalKey<FormState>();
+  final formKey2 = new GlobalKey<FormState>();
   String _name, _amount;
   List<Account> jj = [];
+  var accountData = [];
 
-  //use this with an async function to get from shared preferences
-  // List<Account> getAccounts() {
-  //   // List<dynamic> data = jsonDecode(fakeData);
-  //   List<Account> l = data.map((data) => Account.fromJson(data)).toList();
-  //   return l;
-  //
-  // }
+  int getTotal(transactions) {
+    var total = 0;
+    transactions.forEach((transaction) {
+      if (transaction['type'] == 'withdrawal') {
+        total -= int.parse(transaction['amount']);
+      } else {
+        total += int.parse(transaction['amount']);
+      }
+    });
+    return total;
+  }
+
+  String dropdownValue = 'withdrawal';
+
+  @override
+  void initState() {
+    loadSharedPreferencesAndData();
+    super.initState();
+  }
+
+  void loadSharedPreferencesAndData() async {
+    sharedPreferences = await SharedPreferences.getInstance();
+    loadData();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -59,19 +82,108 @@ class _MyHomePageState extends State {
       appBar: AppBar(title: Text('ListTile guide')),
       body: ListView.builder(
           padding: const EdgeInsets.all(8),
-          itemCount: jj.length,
+          itemCount: accountData.length,
           itemBuilder: (BuildContext context, int index) {
-            return ListTile(
-              // leading: CircleAvatar(
-              //   backgroundImage: NetworkImage(horseUrl),
-              // ),
-              title: Text('${jj[index].name} ${jj[index].goal}'),
-              // subtitle: Text('A strong animal'),
-              trailing: Icon(Icons.keyboard_arrow_right),
-              onTap: () {
-                print('${accounts[index]}');
+            return PopupMenuButton<String>(
+              onSelected: (String value) {
+                if (value == 'transactions') {
+                  Navigator.pushNamed(
+                    context,
+                    TransactionView.routeName,
+                    arguments: ScreenArguments(
+                      '${accountData[index]["name"]}',
+                      index.toString(),
+                    ),
+                  ).then((value) {
+                    loadData();
+                  });
+                } else {
+                  return showDialog(
+                      barrierDismissible: false,
+                      context: context,
+                      builder: (context) {
+                        return AlertDialog(
+                          scrollable: true,
+                          title: Text('Add Goal'),
+                          content: Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Form(
+                              key: formKey2,
+                              child: Column(
+                                children: <Widget>[
+                                  DropdownButton<String>(
+                                    value: dropdownValue,
+                                    icon: Icon(Icons.arrow_downward),
+                                    iconSize: 24,
+                                    elevation: 16,
+                                    style: TextStyle(color: Colors.deepPurple),
+                                    underline: Container(
+                                      height: 2,
+                                      color: Colors.deepPurpleAccent,
+                                    ),
+                                    onChanged: (String newValue) {
+                                      setState(() {
+                                        dropdownValue = newValue;
+                                      });
+                                    },
+                                    items: <String>['withdrawal', 'deposit']
+                                        .map<DropdownMenuItem<String>>(
+                                            (String value) {
+                                      return DropdownMenuItem<String>(
+                                        value: value,
+                                        child: Text(value),
+                                      );
+                                    }).toList(),
+                                  ),
+                                  TextFormField(
+                                    onSaved: (value) {
+                                      setState(() {
+                                        accountData[index]['transactions'].add({
+                                          "amount": value,
+                                          "type": dropdownValue
+                                        });
+                                      });
+                                    },
+                                    decoration: InputDecoration(
+                                      labelText: 'Goal',
+                                      icon: Icon(Icons.account_box),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          actions: [
+                            RaisedButton(
+                                child: Text("Submit"),
+                                onPressed: () {
+                                  final form = formKey2.currentState;
+                                  form.save();
+                                  saveData();
+                                  Navigator.pop(context, false);
+                                })
+                          ],
+                        );
+                      });
+                }
               },
-              // selected: true,
+              child: ListTile(
+                title: Text(
+                    '${accountData[index]["name"]} Goal:  ${accountData[index]["goal"]}'),
+                subtitle: Text(
+                    'Current Total :${getTotal(accountData[index]['transactions'])}'),
+                trailing: Icon(Icons.keyboard_arrow_right),
+              ),
+              itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                const PopupMenuItem<String>(
+                  value: 'transactions',
+                  child: Text('View transactions'),
+                ),
+                const PopupMenuItem<String>(
+                  value: 'add',
+                  child: Text('Add transaction'),
+                ),
+              ],
             );
           }),
       floatingActionButton: FloatingActionButton(
@@ -113,17 +225,16 @@ class _MyHomePageState extends State {
                         onPressed: () {
                           final form = formKey.currentState;
                           form.save();
-                          Account f = Account(name: _name, goal: _amount);
+                          var j = {
+                            "name": _name,
+                            "goal": _amount,
+                            "transactions": []
+                          };
                           setState(() {
-                            jj.add(f);
+                            accountData.add(j);
                           });
-                          // String hh  = json.encode(List<dynamic>.from(jj.map((x) => x.toJson()));
-                          // String j (List<Account> jj) => );
-                          print(json.encode(jj));
-
-                          // List<String> stringList = jj.map(
-                          //         (item) => json.encode(item.toMap()
-                          //     )).toList();
+                          print(json.encode(accountData));
+                          saveData();
                           Navigator.pop(context, false);
                         })
                   ],
@@ -133,6 +244,21 @@ class _MyHomePageState extends State {
         child: Icon(Icons.add),
       ),
     );
+  }
 
+  onGoBack() {
+    loadData();
+    setState(() {});
+  }
+
+  void saveData() {
+    sharedPreferences.setString('list', json.encode(accountData));
+  }
+
+  loadData() {
+    String listString = sharedPreferences.getString('list');
+    setState(() {
+      accountData = json.decode(listString);
+    });
   }
 }
